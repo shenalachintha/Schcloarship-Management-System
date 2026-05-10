@@ -13,3 +13,4 @@ C:\Users\USER\Desktop\2026\Final Project\backend\ScholarshipManagement.Applicati
 C:\Users\USER\Desktop\2026\Final Project\backend\ScholarshipManagement.Application\obj\Debug\net8.0\refint\ScholarshipManagement.Application.dll
 C:\Users\USER\Desktop\2026\Final Project\backend\ScholarshipManagement.Application\obj\Debug\net8.0\ScholarshipManagement.Application.pdb
 C:\Users\USER\Desktop\2026\Final Project\backend\ScholarshipManagement.Application\obj\Debug\net8.0\ref\ScholarshipManagement.Application.dll
+C:\Users\USER\Desktop\2026\Final Project\backend\ScholarshipManagement.Application\obj\Debug\net8.0\ScholarshipManagement.Application.sourcelink.json

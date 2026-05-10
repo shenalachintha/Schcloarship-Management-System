@@ -17,3 +17,4 @@ C:\Users\USER\Desktop\2026\Final Project\backend\ScholarshipManagement.Infrastru
 C:\Users\USER\Desktop\2026\Final Project\backend\ScholarshipManagement.Infrastructure\obj\Debug\net8.0\ScholarshipManagement.Infrastructure.pdb
 C:\Users\USER\Desktop\2026\Final Project\backend\ScholarshipManagement.Infrastructure\obj\Debug\net8.0\ScholarshipManagement.Infrastructure.genruntimeconfig.cache
 C:\Users\USER\Desktop\2026\Final Project\backend\ScholarshipManagement.Infrastructure\obj\Debug\net8.0\ref\ScholarshipManagement.Infrastructure.dll
+C:\Users\USER\Desktop\2026\Final Project\backend\ScholarshipManagement.Infrastructure\obj\Debug\net8.0\ScholarshipManagement.Infrastructure.sourcelink.json
