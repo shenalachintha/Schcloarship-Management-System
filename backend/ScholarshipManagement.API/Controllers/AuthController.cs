@@ -35,7 +35,10 @@ public class AuthController : ControllerBase
             role = result.Role,
             studentId = result.StudentId,
             userId = result.UserId,
-            isApproved = result.IsApproved
+            isApproved = result.IsApproved,
+            faculty = result.Faculty,
+            department = result.Department,
+            name = result.Name
         });
     }
 

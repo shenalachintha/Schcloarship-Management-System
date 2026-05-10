@@ -8,7 +8,7 @@ namespace ScholarshipManagement.API.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Staff,Admin")]
+[Authorize(Roles = "Staff,Admin,HOD,Counselor")]
 public class DisciplineController : ControllerBase
 {
     private readonly IApplicationDbContext _context;
@@ -63,6 +63,40 @@ public class DisciplineController : ControllerBase
             .OrderByDescending(d => d.RecordedDate)
             .Select(d => new { d.DisciplineRecordId, d.Description, d.RecordedDate, d.RecordedBy })
             .ToListAsync(cancellationToken);
+        return Ok(records);
+    }
+
+    [HttpGet("monthly")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> GetMonthlyDisciplineIssues([FromQuery] string month, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(month))
+            return BadRequest("Month is required");
+
+        if (!DateTime.TryParseExact(month, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out var evaluationDate))
+            return BadRequest("Invalid month format");
+
+        var startOfMonth = new DateTime(evaluationDate.Year, evaluationDate.Month, 1);
+        var endOfMonth = startOfMonth.AddMonths(1).AddDays(-1);
+
+        var records = await _context.DisciplineRecords
+            .Include(d => d.Student)
+            .Where(d => d.RecordedDate >= startOfMonth && d.RecordedDate <= endOfMonth)
+            .OrderByDescending(d => d.RecordedDate)
+            .Select(d => new 
+            {
+                d.DisciplineRecordId,
+                d.Description,
+                d.RecordedDate,
+                d.RecordedBy,
+                StudentId = d.StudentId,
+                RegistrationNumber = d.Student.RegistrationNumber,
+                Name = d.Student.Name,
+                Department = d.Student.Department,
+                Batch = d.Student.Batch
+            })
+            .ToListAsync(cancellationToken);
+
         return Ok(records);
     }
 }

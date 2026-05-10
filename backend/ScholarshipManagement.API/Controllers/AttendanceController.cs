@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ScholarshipManagement.Application.Interfaces;
+using ScholarshipManagement.Domain.Constants;
 using System.Security.Claims;
 
 namespace ScholarshipManagement.API.Controllers;
@@ -37,7 +38,7 @@ public class AttendanceController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "Staff,Admin")]
+    [Authorize(Roles = "Staff,Admin,HOD")]
     public async Task<IActionResult> RecordAttendance([FromBody] RecordAttendanceRequest request, CancellationToken cancellationToken)
     {
         var student = await _context.Students.FindAsync(new object[] { request.StudentId }, cancellationToken);
@@ -70,7 +71,7 @@ public class AttendanceController : ControllerBase
     }
 
     [HttpPut("{id}")]
-    [Authorize(Roles = "Staff,Admin")]
+    [Authorize(Roles = "Staff,Admin,HOD")]
     public async Task<IActionResult> UpdateAttendance(int id, [FromBody] UpdateAttendanceRequest request, CancellationToken cancellationToken)
     {
         var attendance = await _context.Attendances.FindAsync(new object[] { id }, cancellationToken);
@@ -85,7 +86,7 @@ public class AttendanceController : ControllerBase
     }
 
     [HttpGet("history/{studentId}")]
-    [Authorize(Roles = "Staff,Admin")]
+    [Authorize(Roles = "Staff,Admin,HOD,Counselor")]
     public async Task<IActionResult> GetHistory(int studentId, CancellationToken cancellationToken)
     {
         var history = await _context.MonthlyAttendances
@@ -148,7 +149,7 @@ public class AttendanceController : ControllerBase
     }
 
     [HttpGet("report")]
-    [Authorize(Roles = "Staff,Admin")]
+    [Authorize(Roles = "Staff,Admin,HOD,Counselor")]
     public async Task<IActionResult> GetAttendanceReport([FromQuery] int? studentId, [FromQuery] int year, [FromQuery] int month, CancellationToken cancellationToken)
     {
         var startOfMonth = new DateTime(year, month, 1);
@@ -174,7 +175,7 @@ public class AttendanceController : ControllerBase
         return Ok(grouped);
     }
     [HttpPost("monthly-percentage")]
-    [Authorize(Roles = "Staff,Admin")]
+    [Authorize(Roles = "Staff,Admin,HOD")]
     public async Task<IActionResult> RecordMonthlyPercentage([FromBody] RecordMonthlyPercentageRequest request, CancellationToken cancellationToken)
     {
         var student = await _context.Students.FindAsync(new object[] { request.StudentId }, cancellationToken);
@@ -227,6 +228,136 @@ public class AttendanceController : ControllerBase
         await _context.SaveChangesAsync(cancellationToken);
         return Ok(new { message = "Monthly attendance recorded successfully" });
     }
+
+    [HttpPost("bulk-monthly-percentage")]
+    [Authorize(Roles = "Admin,HOD")]
+    public async Task<IActionResult> BulkUploadMonthlyAttendance([FromBody] BulkMonthlyAttendanceRequest request, CancellationToken cancellationToken)
+    {
+        if (request.Records == null || !request.Records.Any())
+            return BadRequest("No records provided");
+
+        // Fetch HOD's department if the user is an HOD
+        string? hodDepartment = null;
+        if (User.IsInRole("HOD"))
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(userIdClaim, out var userId))
+            {
+                var hod = await _context.Users.FindAsync(new object[] { userId }, cancellationToken);
+                hodDepartment = hod?.Department;
+            }
+        }
+
+        var results = new List<string>();
+        int count = 0;
+
+        foreach (var record in request.Records)
+        {
+            var student = await _context.Students
+                .FirstOrDefaultAsync(s => s.RegistrationNumber == record.RegistrationNumber, cancellationToken);
+
+            if (student == null)
+            {
+                results.Add($"Student with Reg No {record.RegistrationNumber} not found");
+                continue;
+            }
+
+            // Cross-Department Validation
+            if (User.IsInRole("HOD") && !string.IsNullOrEmpty(hodDepartment) && student.Department != hodDepartment)
+            {
+                results.Add($"Security Violation: Reg No {record.RegistrationNumber} does not belong to your department ({hodDepartment})");
+                continue;
+            }
+
+            var existing = await _context.MonthlyAttendances
+                .FirstOrDefaultAsync(a => a.StudentId == student.StudentId && a.Month == request.Month, cancellationToken);
+
+            if (existing != null)
+            {
+                existing.Percentage = record.Percentage;
+                existing.RecordedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                _context.MonthlyAttendances.Add(new Domain.Entities.MonthlyAttendance
+                {
+                    StudentId = student.StudentId,
+                    Month = request.Month,
+                    Percentage = record.Percentage,
+                    RecordedAt = DateTime.UtcNow
+                });
+            }
+            count++;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return Ok(new { message = $"Successfully processed {count} records", details = results });
+    }
+
+    [HttpGet("high-attendance-report")]
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> GetHighAttendanceReport([FromQuery] string month, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(month))
+            return BadRequest("Month is required");
+
+        if (!DateTime.TryParseExact(month, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out var evaluationDate))
+            return BadRequest("Invalid month format");
+
+        var startOfMonth = new DateTime(evaluationDate.Year, evaluationDate.Month, 1);
+        var endOfMonth = startOfMonth.AddMonths(1).AddDays(-1);
+
+        var processedPaymentStudentIds = await _context.Payments
+            .Where(p => p.Month == month && p.PaymentStatus == ScholarshipConstants.StatusProcessed)
+            .Select(p => p.StudentId)
+            .ToListAsync(cancellationToken);
+
+        var report = await _context.MonthlyAttendances
+            .Include(a => a.Student)
+                .ThenInclude(s => s.DisciplineRecords)
+            .Where(a => a.Month == month && a.Percentage >= 80)
+            .Where(a => !processedPaymentStudentIds.Contains(a.StudentId))
+            .Where(a => !a.Student.DisciplineRecords.Any(r => r.RecordedDate >= startOfMonth && r.RecordedDate <= endOfMonth))
+            .Select(a => new
+            {
+                a.Student.StudentId,
+                a.Student.RegistrationNumber,
+                a.Student.Name,
+                a.Student.NIC,
+                a.Student.Faculty,
+                a.Student.Department,
+                a.Student.Batch,
+                a.Student.ScholarshipType,
+                Percentage = a.Percentage
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(report);
+    }
+
+    [HttpGet("all-monthly")]
+    [Authorize(Roles = "Admin,HOD")]
+    public async Task<IActionResult> GetAllMonthlyAttendance([FromQuery] string month, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(month))
+            return BadRequest("Month is required");
+
+        var report = await _context.MonthlyAttendances
+            .Include(a => a.Student)
+            .Where(a => a.Month == month)
+            .Select(a => new
+            {
+                a.Student.StudentId,
+                a.Student.RegistrationNumber,
+                a.Student.Name,
+                a.Student.Department,
+                a.Student.Batch,
+                Percentage = a.Percentage
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(report);
+    }
 }
 
 public class RecordAttendanceRequest
@@ -245,5 +376,16 @@ public class RecordMonthlyPercentageRequest
 {
     public int StudentId { get; set; }
     public string Month { get; set; } = string.Empty;
+    public decimal Percentage { get; set; }
+}
+public class BulkMonthlyAttendanceRequest
+{
+    public string Month { get; set; } = string.Empty;
+    public List<AttendancePercentageItem> Records { get; set; } = new();
+}
+
+public class AttendancePercentageItem
+{
+    public string RegistrationNumber { get; set; } = string.Empty;
     public decimal Percentage { get; set; }
 }

@@ -30,4 +30,7 @@ public class AuthResult
     public int? StudentId { get; set; }
     public int UserId { get; set; }
     public bool IsApproved { get; set; }
+    public string? Faculty { get; set; }
+    public string? Department { get; set; }
+    public string? Name { get; set; }
 }

@@ -10,6 +10,7 @@ export default function StudentDashboard() {
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [activeTab, setActiveTab] = useState('overview');
 
   const userKey = user?.studentId ?? user?.userId ?? user?.username ?? null;
 
@@ -66,15 +67,67 @@ export default function StudentDashboard() {
     }
   };
 
+  const sidebarItems = [
+    { id: 'overview', label: 'Overview', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg> },
+    { id: 'forecast', label: 'Payment Forecast', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" /></svg> },
+    { id: 'attendance', label: 'Attendance', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> },
+    { id: 'payments', label: 'Payment History', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> },
+    { id: 'notifications', label: 'Notifications', icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg> },
+  ];
+
   return (
-    <div className="space-y-10 animate-fade-in pb-12">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-4xl font-black text-slate-900 tracking-tight">Student Overview</h1>
-          <p className="text-slate-500 mt-2 font-bold uppercase tracking-widest text-[10px]">Your Academic & Financial Performance Hub</p>
+    <div className="flex gap-8 animate-fade-in pb-12">
+      {/* Sidebar */}
+      <aside className="w-72 flex-shrink-0 hidden lg:block">
+        <div className="sticky top-28 space-y-2">
+          <div className="mb-6">
+            <h1 className="text-2xl font-black text-slate-900 tracking-tight">Student Portal</h1>
+            <p className="text-slate-400 mt-1 font-bold uppercase tracking-widest text-[9px]">Academic & Financial Hub</p>
+          </div>
+          {sidebarItems.map(item => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl text-left transition-all duration-300 group ${
+                activeTab === item.id
+                  ? 'bg-primary-600 text-white shadow-lg shadow-primary-600/20'
+                  : 'text-slate-500 hover:bg-white hover:text-slate-900 hover:shadow-sm'
+              }`}
+            >
+              <span className={`${activeTab === item.id ? 'text-white' : 'text-slate-400 group-hover:text-primary-500'} transition-colors`}>
+                {item.icon}
+              </span>
+              <span className="font-bold text-sm tracking-tight">{item.label}</span>
+              {item.id === 'notifications' && notifications.length > 0 && (
+                <span className={`ml-auto text-[9px] font-black px-2 py-0.5 rounded-full ${activeTab === item.id ? 'bg-white/20 text-white' : 'bg-violet-100 text-violet-600'}`}>
+                  {notifications.length}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
+      </aside>
+
+      {/* Mobile Tab Bar */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-slate-100 z-50 flex justify-around py-2 px-2">
+        {sidebarItems.map(item => (
+          <button
+            key={item.id}
+            onClick={() => setActiveTab(item.id)}
+            className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all ${activeTab === item.id ? 'text-primary-600' : 'text-slate-400'}`}
+          >
+            {item.icon}
+            <span className="text-[8px] font-black uppercase tracking-wider">{item.label.split(' ')[0]}</span>
+          </button>
+        ))}
       </div>
 
+      {/* Main Content */}
+      <main className="flex-1 min-w-0 space-y-10">
+
+      {/* === OVERVIEW TAB === */}
+      {activeTab === 'overview' && (
+      <div className="space-y-10">
       {/* Hero Eligibility Card */}
       <div className={`relative p-8 rounded-[2.5rem] overflow-hidden transition-all duration-500 border-2 ${isEligible ? 'bg-emerald-50/50 border-emerald-200' : 'bg-amber-50/50 border-amber-200'} group shadow-sm hover:shadow-md`}>
         <div className={`absolute top-0 right-0 w-96 h-96 blur-[100px] opacity-20 -z-10 transition-transform duration-700 group-hover:scale-110 ${isEligible ? 'bg-emerald-400' : 'bg-amber-400'}`}></div>
@@ -194,7 +247,12 @@ export default function StudentDashboard() {
           </div>
         </div>
       </div>
+      </div>
+      )}
 
+      {/* === FORECAST TAB === */}
+      {activeTab === 'forecast' && (
+      <div className="space-y-10">
       {(forecastedPayments && forecastedPayments.length > 0) ? (
         <div className="bg-white p-8 rounded-[2.5rem] shadow-glass border border-slate-100 relative overflow-hidden">
           <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-8 flex items-center gap-3">
@@ -245,7 +303,12 @@ export default function StudentDashboard() {
            <p className="text-[10px] font-black uppercase tracking-[0.2em]">{forecastedPayments?.length === 0 ? 'No future payments scheduled' : 'Roadmap unavailable for current tenure status'}</p>
         </div>
       )}
+      </div>
+      )}
 
+      {/* === ATTENDANCE TAB === */}
+      {activeTab === 'attendance' && (
+      <div className="space-y-10">
       {/* Attendance Velocity History */}
       <div className="bg-white p-8 rounded-[2.5rem] shadow-glass border border-slate-100 relative overflow-hidden">
         <div className="absolute top-0 right-0 p-8 text-primary-50">
@@ -298,10 +361,13 @@ export default function StudentDashboard() {
            )}
         </div>
       </div>
+      </div>
+      )}
 
-      {/* History & Notifications Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-10">
-        <div className="lg:col-span-3 bg-white rounded-[2.5rem] shadow-glass border border-slate-100 overflow-hidden flex flex-col">
+      {/* === PAYMENTS TAB === */}
+      {activeTab === 'payments' && (
+      <div className="space-y-10">
+        <div className="bg-white rounded-[2.5rem] shadow-glass border border-slate-100 overflow-hidden flex flex-col">
           <header className="p-8 border-b border-slate-50 flex items-center justify-between bg-slate-50/10">
             <h3 className="font-black text-xl text-slate-900 tracking-tight flex items-center gap-4">
               <div className="w-12 h-12 rounded-2xl bg-primary-100 text-primary-600 flex items-center justify-center shadow-sm">
@@ -347,8 +413,13 @@ export default function StudentDashboard() {
             )}
           </div>
         </div>
+      </div>
+      )}
 
-        <div className="lg:col-span-2 bg-white rounded-[2.5rem] shadow-glass border border-slate-100 overflow-hidden flex flex-col">
+      {/* === NOTIFICATIONS TAB === */}
+      {activeTab === 'notifications' && (
+      <div className="space-y-10">
+        <div className="bg-white rounded-[2.5rem] shadow-glass border border-slate-100 overflow-hidden flex flex-col">
           <header className="p-8 border-b border-slate-50 flex items-center justify-between bg-slate-50/10">
             <h3 className="font-black text-xl text-slate-900 tracking-tight flex items-center gap-4">
               <div className="w-12 h-12 rounded-2xl bg-violet-100 text-violet-600 flex items-center justify-center shadow-sm">
@@ -386,6 +457,9 @@ export default function StudentDashboard() {
           </div>
         </div>
       </div>
+      )}
+
+      </main>
     </div>
   );
 }

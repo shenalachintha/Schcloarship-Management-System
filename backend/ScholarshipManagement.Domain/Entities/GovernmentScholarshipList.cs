@@ -11,6 +11,7 @@ public class GovernmentScholarshipList
     public string Batch { get; set; } = string.Empty;
     public string Specialization { get; set; } = string.Empty;
     public string? ScholarshipType { get; set; } // Mahapola, Bursary (Assigned by Staff)
+    public string Email { get; set; } = string.Empty;
     public string Status { get; set; } = "Pending"; // Pending, Assigned
     public DateTime ApprovedDate { get; set; }
     public string Remarks { get; set; } = string.Empty;

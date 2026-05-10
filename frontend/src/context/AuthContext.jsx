@@ -24,7 +24,10 @@ export function AuthProvider({ children }) {
       role: data.role || data.Role,
       studentId: data.studentId || data.StudentId,
       userId: data.userId || data.UserId,
-      isApproved: data.isApproved ?? data.IsApproved ?? false
+      isApproved: data.isApproved ?? data.IsApproved ?? false,
+      faculty: data.faculty || data.Faculty,
+      department: data.department || data.Department,
+      name: data.name || data.Name
     };
     localStorage.setItem('token', data.token || data.Token);
     localStorage.setItem('user', JSON.stringify(userData));

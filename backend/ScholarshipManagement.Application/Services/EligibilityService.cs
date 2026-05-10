@@ -58,7 +58,7 @@ public class EligibilityService : IEligibilityService
         var result = new EligibilityResult { EvaluationMonth = month };
 
         // Rule 1: Discipline check (monthly only)
-        // A discipline issue should affect only the month it was recorded.
+        // A discipline issue should affect ONLY the month it was recorded — next month is clean slate.
         if (DateTime.TryParseExact(month, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out var evaluationDate))
         {
             var startOfMonth = new DateTime(evaluationDate.Year, evaluationDate.Month, 1);
@@ -66,10 +66,21 @@ public class EligibilityService : IEligibilityService
 
             if (student.DisciplineRecords.Any(r => r.RecordedDate >= startOfMonth && r.RecordedDate <= endOfMonth))
             {
+                // Determine the scholarship type for the message even before the full eligibility check
+                var preApprovedForMsg = await _context.GovernmentScholarshipLists
+                    .FirstOrDefaultAsync(g =>
+                        (g.RegistrationNumber == student.RegistrationNumber || g.NIC == student.NIC) &&
+                        (g.Status == "Assigned" || g.Status == "Provisioned"),
+                        cancellationToken);
+                var schType = preApprovedForMsg?.ScholarshipType ?? "Mahapola / Bursary";
+
                 result.HasDisciplineIssue = true;
                 result.IsEligible = false;
+                result.ScholarshipType = schType;
+                result.EvaluationMonth = month;
                 result.RejectionReasons.Add($"Disciplinary action recorded for {month}");
-                result.Message = $"Not Eligible: Disciplinary issue recorded for {month}. Scholarship inactive.";
+                result.Message = $"Not Eligible: A disciplinary issue was recorded for {month}. Your {schType} scholarship is suspended for this month only. Meet Assistant Registrar for more details.";
+                return result; // Return immediately — discipline suspends only this month
             }
         }
 

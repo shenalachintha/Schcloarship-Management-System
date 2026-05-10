@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { paymentsApi, analyticsApi, governmentApi, adminManagementApi } from '../api/api';
+import { paymentsApi, analyticsApi, governmentApi, adminManagementApi, attendanceApi, disciplineApi } from '../api/api';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import * as XLSX from 'xlsx';
 
@@ -17,6 +17,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [processingPaymentId, setProcessingPaymentId] = useState(null);
+  const [bulkApprovingPayments, setBulkApprovingPayments] = useState(false);
   
   // Provisioning State
   const [showProvisionModal, setShowProvisionModal] = useState(false);
@@ -27,6 +28,30 @@ export default function AdminDashboard() {
   const [stuFilter, setStuFilter] = useState({ batch: '', faculty: '', type: '' });
   const [uploadType, setUploadType] = useState('Standard'); // Standard, Mahapola, Bursary
 
+  const departments = [
+    "Department of Computer Science",
+    "Department of Physical Science",
+    "Department of Language and Communication Studies",
+    "Department of Business Management Studies",
+    "Department of Physiology",
+    "Department of Pharmacology",
+    "Department of Clinical"
+  ];
+
+  const [showAddStaffModal, setShowAddStaffModal] = useState(false);
+  const [newStaff, setNewStaff] = useState({
+    username: '',
+    password: '',
+    name: '',
+    role: 'HOD',
+    department: departments[0],
+    faculty: ''
+  });
+  const [creatingStaff, setCreatingStaff] = useState(false);
+
+  const [highAttendanceReport, setHighAttendanceReport] = useState([]);
+  const [allMonthlyAttendance, setAllMonthlyAttendance] = useState([]);
+  const [monthlyDiscipline, setMonthlyDiscipline] = useState([]);
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -41,7 +66,10 @@ export default function AdminDashboard() {
         wrap(adminManagementApi.getPendingStaff(), setPendingStaff),
         wrap(adminManagementApi.getApprovedStaff(), setApprovedStaff),
         wrap(adminManagementApi.getFinancialHistory(), setPaymentHistory),
-        wrap(paymentsApi.getEligible(month), setPendingPayments)
+        wrap(paymentsApi.getEligible(month), setPendingPayments),
+        wrap(attendanceApi.getHighAttendanceReport(month), setHighAttendanceReport),
+        wrap(attendanceApi.getAllMonthly(month), setAllMonthlyAttendance),
+        wrap(disciplineApi.getMonthlyIssues(month), setMonthlyDiscipline)
       ]);
       
       setLoading(false);
@@ -58,7 +86,10 @@ export default function AdminDashboard() {
       wrap(adminManagementApi.getPendingStaff(), setPendingStaff),
       wrap(adminManagementApi.getApprovedStaff(), setApprovedStaff),
       wrap(adminManagementApi.getFinancialHistory(), setPaymentHistory),
-      wrap(paymentsApi.getEligible(month), setPendingPayments)
+      wrap(paymentsApi.getEligible(month), setPendingPayments),
+      wrap(attendanceApi.getHighAttendanceReport(month), setHighAttendanceReport),
+      wrap(attendanceApi.getAllMonthly(month), setAllMonthlyAttendance),
+      wrap(disciplineApi.getMonthlyIssues(month), setMonthlyDiscipline)
     ]);
     setLoading(false);
   };
@@ -119,6 +150,27 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleBulkApprovePayment = async () => {
+    if (!highAttendanceReport.length) return;
+    if (!window.confirm(`Approve payments for all ${highAttendanceReport.length} eligible students for ${new Date(month + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}?`)) return;
+    setBulkApprovingPayments(true);
+    setMessage('');
+    try {
+      const requests = highAttendanceReport.map(s => ({
+        studentId: s.studentId,
+        month,
+        scholarshipType: s.scholarshipType
+      }));
+      const res = await paymentsApi.bulkApprove(requests);
+      setMessage(res.data?.message || 'Bulk payment approval completed.');
+      await refreshData();
+    } catch (err) {
+      setMessage(err.response?.data?.message || 'Bulk payment approval failed.');
+    } finally {
+      setBulkApprovingPayments(false);
+    }
+  };
+
   const [processingProvision, setProcessingProvision] = useState(false);
   
   const handleProvisionAccount = async (e) => {
@@ -147,6 +199,33 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleCreateStaff = async (e) => {
+    e.preventDefault();
+    setCreatingStaff(true);
+    try {
+      const staffToCreate = { ...newStaff };
+      if (staffToCreate.role === 'Counselor') {
+        staffToCreate.department = 'All Departments';
+      }
+      const res = await adminManagementApi.createStaff(staffToCreate);
+      setMessage(res.data.message);
+      setShowAddStaffModal(false);
+      setNewStaff({
+        username: '',
+        password: '',
+        name: '',
+        role: 'HOD',
+        department: departments[0],
+        faculty: ''
+      });
+      refreshData();
+    } catch (err) {
+      setMessage(`Error: ${err.response?.data?.message || 'Failed to create account'}`);
+    } finally {
+      setCreatingStaff(false);
+    }
+  };
+
   const handleExcelUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -160,13 +239,6 @@ export default function AdminDashboard() {
           const ws = wb.Sheets[sheetName];
           return XLSX.utils.sheet_to_json(ws);
         });
-        
-        console.log('Parsed Excel Data:', rawData);
-
-        if (!rawData || rawData.length === 0) {
-          setMessage('The selected Excel sheet is empty.');
-          return;
-        }
 
         const normalizeKey = (key) => String(key || '')
           .trim()
@@ -181,18 +253,14 @@ export default function AdminDashboard() {
 
         const students = rawData.map(row => ({
           registrationNumber: readValue(row, [
-            'Registration Number',
-            'Registration No',
-            'Reg No',
-            'RegNumber',
-            'Index Number',
-            'Student ID'
+            'Registration Number', 'Registration No', 'Reg No', 'RegNumber', 'Index Number', 'Student ID'
           ]),
           nic: readValue(row, ['NIC', 'NIC No', 'National ID', 'National Identity Card']),
           name: readValue(row, ['Name', 'Student Name', 'Full Name']),
           faculty: readValue(row, ['Faculty']),
           department: readValue(row, ['Department']),
           batch: readValue(row, ['Batch']),
+          email: readValue(row, ['Email', 'Official Email', 'Mail', 'Student Email']),
           scholarshipType: uploadType === 'Standard' ? null : uploadType
         })).filter(s => s.nic);
 
@@ -220,6 +288,37 @@ export default function AdminDashboard() {
     e.target.value = ''; 
   };
 
+  const handleResetSystem = async () => {
+    if (!window.confirm('CRITICAL: This will permanently delete all student accounts, government records, and profiles. Are you sure?')) return;
+    setLoading(true);
+    try {
+      await adminManagementApi.resetStudents();
+      setMessage('System successfully reset. All student records cleared.');
+      await refreshData();
+    } catch (err) {
+      setMessage('Reset failed: ' + (err.response?.data?.message || 'Server error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const [bulkProvisioning, setBulkProvisioning] = useState(false);
+  const handleBulkProvision = async (ids) => {
+    if (!window.confirm(`Initialize automated provisioning for ${ids.length} students? This will generate accounts and send official emails.`)) return;
+    setBulkProvisioning(true);
+    try {
+      const res = await adminManagementApi.bulkProvision(ids);
+      setMessage(res.data.message);
+      await refreshData();
+    } catch (err) {
+      setMessage('Bulk provisioning failed: ' + (err.response?.data?.message || 'Server error'));
+    } finally {
+      setBulkProvisioning(false);
+    }
+  };
+
+  const [expandedGroup, setExpandedGroup] = useState('students');
+
   const filteredStudents = useMemo(() => {
     if (!showList) return [];
     
@@ -246,33 +345,116 @@ export default function AdminDashboard() {
     ? analytics.monthlyPayments.map((m) => ({ name: m.type, count: m.count, total: m.total }))
     : [{ name: 'Mahapola', count: 0, total: 0 }, { name: 'Bursary', count: 0, total: 0 }];
 
-  const NavItem = ({ id, label, icon }) => (
-    <button
-      onClick={() => setActiveTab(id)}
-      className={`flex items-center gap-4 px-6 py-4 rounded-2xl transition-all duration-300 w-full text-left group ${
-        activeTab === id 
-        ? 'bg-primary-600 text-white shadow-xl shadow-primary-500/20 active:scale-95' 
-        : 'text-slate-500 hover:bg-slate-100'
-      }`}
-    >
-      <div className={`p-2 rounded-xl transition-colors ${activeTab === id ? 'bg-white/20' : 'bg-slate-100 group-hover:bg-white'}`}>
-        {icon}
+  const sidebarGroups = [
+    {
+      id: 'overview',
+      label: 'Overview',
+      icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>,
+      tab: 'overview',
+      children: []
+    },
+    {
+      id: 'students',
+      label: 'Student Management',
+      icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>,
+      children: [
+        { id: 'students', label: 'MIS Student Registry', icon: '🗂️' },
+        { id: 'students_attendance', label: 'Monthly Attendance', icon: '📅' },
+        { id: 'students_discipline', label: 'Disciplinary Issues', icon: '⚠️' },
+      ]
+    },
+    {
+      id: 'staff',
+      label: 'Staff Management',
+      icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>,
+      children: [
+        { id: 'staff_pending', label: 'Pending Approvals', icon: '⏳' },
+        { id: 'staff_active', label: 'Active Staff', icon: '✅' },
+        { id: 'staff_create', label: 'Create Account', icon: '➕' },
+      ]
+    },
+    {
+      id: 'financial',
+      label: 'Financial Operations',
+      icon: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+      children: [
+        { id: 'financial_eligibility', label: 'Eligibility Board', icon: '🏆' },
+        { id: 'financial_history', label: 'Payment History', icon: '📜' },
+      ]
+    },
+  ];
+
+  const SidebarGroup = ({ group }) => {
+    const isExpanded = expandedGroup === group.id;
+    const isLeaf = group.children.length === 0;
+    const isActive = isLeaf ? activeTab === group.tab : group.children.some(c => c.id === activeTab);
+
+    if (isLeaf) {
+      return (
+        <button
+          onClick={() => { setActiveTab(group.tab); setExpandedGroup(group.id); }}
+          className={`flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-200 w-full text-left ${
+            activeTab === group.tab
+              ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/20'
+              : 'text-slate-500 hover:bg-slate-100'
+          }`}
+        >
+          <div className={`p-2 rounded-xl transition-colors ${activeTab === group.tab ? 'bg-white/20' : 'bg-slate-100'}`}>{group.icon}</div>
+          <span className="font-black text-xs uppercase tracking-widest">{group.label}</span>
+        </button>
+      );
+    }
+
+    return (
+      <div>
+        <button
+          onClick={() => setExpandedGroup(isExpanded ? '' : group.id)}
+          className={`flex items-center gap-3 px-4 py-3 rounded-2xl transition-all duration-200 w-full text-left ${
+            isActive
+              ? 'bg-slate-900 text-white shadow-lg'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <div className={`p-2 rounded-xl transition-colors ${isActive ? 'bg-white/10' : 'bg-slate-100'}`}>{group.icon}</div>
+          <span className="font-black text-xs uppercase tracking-widest flex-grow">{group.label}</span>
+          <svg
+            className={`w-4 h-4 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''} ${isActive ? 'text-white/60' : 'text-slate-400'}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {isExpanded && (
+          <div className="ml-4 mt-1 space-y-1 border-l-2 border-slate-100 pl-3">
+            {group.children.map(child => (
+              <button
+                key={child.id}
+                onClick={() => setActiveTab(child.id)}
+                className={`flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-200 w-full text-left ${
+                  activeTab === child.id
+                    ? 'bg-primary-50 text-primary-700 font-black shadow-sm border border-primary-100'
+                    : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <span className="text-sm">{child.icon}</span>
+                <span className="font-bold text-[11px] uppercase tracking-wider">{child.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      <span className="font-black text-xs uppercase tracking-widest">{label}</span>
-    </button>
-  );
+    );
+  };
 
   return (
     <div className="flex flex-col lg:flex-row gap-10 animate-fade-in pb-12">
       {/* Sidebar Navigation */}
       <aside className="lg:w-72 flex-shrink-0 space-y-4">
-        <div className="bg-white p-6 rounded-[2.5rem] shadow-glass border border-slate-100 space-y-2">
-          <NavItem id="overview" label="Overview" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>} />
-          <NavItem id="staff" label="Staff Management" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>} />
-          <NavItem id="students" label="Student Management" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>} />
-          <NavItem id="financial" label="Financial Ops" icon={<svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>} />
+        <div className="bg-white p-4 rounded-[2.5rem] shadow-glass border border-slate-100 space-y-1.5">
+          {sidebarGroups.map(group => <SidebarGroup key={group.id} group={group} />)}
         </div>
-        
+
         <div className="bg-slate-900 p-8 rounded-[2.5rem] text-white overflow-hidden relative group">
           <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-white/10 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-700"></div>
           <h4 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-50 mb-4">Governance Mode</h4>
@@ -291,15 +473,15 @@ export default function AdminDashboard() {
           <div>
             <h1 className="text-4xl font-black text-slate-900 tracking-tight">
               {activeTab === 'overview' && 'System Analytics'}
-              {activeTab === 'staff' && 'Staff Management'}
-              {activeTab === 'students' && 'MIS Student Access'}
-              {activeTab === 'financial' && 'Financial Operations'}
+              {['students', 'students_attendance', 'students_discipline'].includes(activeTab) && 'Student Management'}
+              {['staff', 'staff_pending', 'staff_active', 'staff_create'].includes(activeTab) && 'Staff Management'}
+              {['financial', 'financial_eligibility', 'financial_history'].includes(activeTab) && 'Financial Operations'}
             </h1>
             <p className="text-slate-500 mt-2 font-bold uppercase tracking-widest text-[10px]">
               {activeTab === 'overview' && 'Global System Performance & disbursement Intelligence'}
-              {activeTab === 'staff' && 'Administrative Personnel Approval & Directory'}
-              {activeTab === 'students' && 'Bulk Authorization & Student Demographic Control'}
-              {activeTab === 'financial' && 'Payment Processing & Transaction Lifecycle History'}
+              {['students', 'students_attendance', 'students_discipline'].includes(activeTab) && 'Bulk Authorization, Attendance & Conduct Monitoring'}
+              {['staff', 'staff_pending', 'staff_active', 'staff_create'].includes(activeTab) && 'Administrative Personnel Approval & Directory'}
+              {['financial', 'financial_eligibility', 'financial_history'].includes(activeTab) && 'Payment Processing & Transaction Lifecycle History'}
             </p>
           </div>
           
@@ -366,10 +548,23 @@ export default function AdminDashboard() {
           </>
         )}
 
-        {/* --- STAFF MANAGEMENT TAB --- */}
-        {activeTab === 'staff' && (
+        {/* --- STAFF MANAGEMENT TABS --- */}
+        {['staff_pending', 'staff_active', 'staff_create'].includes(activeTab) && (
           <div className="space-y-10">
-            {/* Pending Approvals */}
+            {/* Create Account button - shown on all staff views */}
+            {activeTab === 'staff_create' && (
+              <div className="flex justify-end">
+                <button 
+                  onClick={() => setShowAddStaffModal(true)}
+                  className="flex items-center gap-3 px-8 py-4 bg-primary-600 text-white rounded-2xl font-black text-sm hover:bg-primary-700 transition-all shadow-xl shadow-primary-500/20 active:scale-95"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path></svg>
+                  Provision HOD / Counselor
+                </button>
+              </div>
+            )}
+            {/* Pending Approvals - only shown on staff_pending */}
+            {activeTab === 'staff_pending' && (
             <div className="bg-white rounded-[2.5rem] shadow-glass border border-slate-100 overflow-hidden">
               <header className="p-8 border-b border-slate-50 bg-slate-50/20 flex items-center justify-between">
                 <h3 className="font-black text-xl text-slate-900 flex items-center gap-3">
@@ -406,7 +601,10 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Approved Staff Directory */}
+            )}
+
+            {/* Approved Staff Directory - only shown on staff_active */}
+            {activeTab === 'staff_active' && (
             <div className="bg-white rounded-[2.5rem] shadow-glass border border-slate-100 overflow-hidden">
               <header className="p-8 border-b border-slate-50 bg-slate-50/20">
                 <h3 className="font-black text-xl text-slate-900 flex items-center gap-3">
@@ -425,21 +623,51 @@ export default function AdminDashboard() {
                     {approvedStaff.map(s => (
                       <tr key={s.userId} className="hover:bg-slate-50/50 transition-colors">
                         <td className="px-8 py-6"><p className="font-black text-slate-900 leading-tight">{s.name}</p><p className="text-[10px] text-slate-400 font-bold uppercase mt-1">@{s.username}</p></td>
-                        <td className="px-8 py-6"><p className="text-xs font-bold text-slate-600">{s.faculty}</p><p className="text-[10px] text-slate-400 font-medium">{s.department}</p></td>
-                        <td className="px-8 py-6 text-right"><span className="px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 border border-emerald-100">Verified Personnel</span></td>
+                        <td className="px-8 py-6">
+                          <p className="text-xs font-bold text-slate-600">{s.faculty || 'N/A'}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">{s.department}</p>
+                        </td>
+                        <td className="px-8 py-6 text-right">
+                          <div className="flex flex-col items-end gap-2">
+                            <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${s.role === 'HOD' ? 'bg-primary-50 text-primary-600 border border-primary-100' : 'bg-rose-50 text-rose-600 border border-rose-100'}`}>
+                              {s.role} Personnel
+                            </span>
+                            {s.role === 'HOD' && (
+                              <select 
+                                className="text-[9px] font-black uppercase bg-slate-50 border-none rounded-lg px-2 py-1 text-slate-400 hover:text-primary-600 cursor-pointer outline-none"
+                                onChange={async (e) => {
+                                  if (!e.target.value) return;
+                                  try {
+                                    await adminManagementApi.updateStaffDepartment(s.userId, e.target.value);
+                                    setMessage(`Updated department for ${s.name}`);
+                                    await refreshData();
+                                  } catch (err) {
+                                    setMessage('Update failed');
+                                  }
+                                }}
+                                value={s.department || ''}
+                              >
+                                <option value="">Assign Dept...</option>
+                                {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                              </select>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             </div>
-          </div>
+            )}
+         </div>
         )}
 
-        {/* --- STUDENT MANAGEMENT TAB --- */}
-        {activeTab === 'students' && (
+        {/* --- STUDENT MANAGEMENT TABS --- */}
+        {['students', 'students_attendance', 'students_discipline'].includes(activeTab) && (
           <div className="space-y-10">
-            {/* Excel Upload Card - Now on Top */}
+            {/* Excel Upload Card - Only on MIS Registry sub-tab */}
+            {activeTab === 'students' && (
             <div className="bg-white p-10 rounded-[2.5rem] shadow-glass border border-slate-100 relative overflow-hidden group">
               <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-primary-100 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700"></div>
               <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
@@ -475,7 +703,10 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Advanced Filtering */}
+            )}
+
+            {/* Advanced Filtering - Only on MIS Registry sub-tab */}
+            {activeTab === 'students' && (
             <div className="bg-white p-10 rounded-[2.5rem] shadow-glass border border-slate-100">
               <h3 className="font-black text-xl text-slate-900 mb-8 tracking-tight flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center">
@@ -522,21 +753,143 @@ export default function AdminDashboard() {
                   </div>
                 </div>
                 <div className="flex gap-3">
-                  <button onClick={() => { setStuFilter({batch:'', faculty:'', type: ''}); setShowList(false); }} className="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">Reset Intelligence</button>
-                  {!showList && <button onClick={() => setShowList(true)} className="px-6 py-3 bg-primary-500 hover:bg-primary-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">Show All</button>}
+                  <button onClick={handleResetSystem} className="px-6 py-3 bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/30 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all text-rose-400">Clear All Records</button>
+                  <button onClick={() => { setStuFilter({batch:'', faculty:'', type: ''}); setShowList(false); }} className="px-6 py-3 bg-white/10 hover:bg-white/20 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">Collapse View</button>
+                  {!showList && <button onClick={() => setShowList(true)} className="px-6 py-3 bg-primary-500 hover:bg-primary-600 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all">Show Registry</button>}
                 </div>
               </div>
             </div>
 
-            {/* MIS Registry Table */}
+            )}
+
+            {/* Ragging/Discipline Table - Only on students_discipline sub-tab */}
+            {activeTab === 'students_discipline' && (
+            <div className="bg-white rounded-[2.5rem] shadow-glass border border-slate-100 overflow-hidden mb-10">
+              <header className="p-8 border-b border-slate-50 bg-slate-50/20">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-black text-xl text-slate-900 tracking-tight flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                    </div>
+                    Disciplinary Issues (Ragging) for {new Date(month + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                  </h3>
+                  <div className="flex items-center gap-4 bg-white px-6 py-3 rounded-2xl border border-slate-100 shadow-sm">
+                    <span className="text-slate-400 font-black uppercase tracking-widest text-[9px]">Target Month</span>
+                    <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} min={new Date().toISOString().slice(0, 7)} max={new Date().toISOString().slice(0, 7)} className="bg-transparent border-none text-slate-900 font-bold focus:outline-none p-0 text-sm" />
+                  </div>
+                </div>
+              </header>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="text-[10px] text-slate-400 uppercase tracking-widest font-black bg-slate-50">
+                    <tr><th className="px-8 py-5">Profile</th><th className="px-8 py-5">Department</th><th className="px-8 py-5">Batch</th><th className="px-8 py-5">Issue Description</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {monthlyDiscipline.length === 0 ? (
+                      <tr><td colSpan="4" className="px-8 py-16 text-center text-slate-300 font-bold uppercase tracking-widest text-[10px]">No disciplinary issues recorded for this month</td></tr>
+                    ) : (
+                      monthlyDiscipline.map((d, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-8 py-6"><p className="font-black text-slate-900 leading-tight">{d.name}</p><p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{d.registrationNumber}</p></td>
+                          <td className="px-8 py-6"><p className="text-xs font-bold text-slate-600">{d.department}</p></td>
+                          <td className="px-8 py-6"><p className="text-xs font-bold text-slate-600">Batch {d.batch}</p></td>
+                          <td className="px-8 py-6"><span className="inline-flex items-center px-4 py-2 rounded-xl text-xs font-black bg-rose-50 text-rose-600 border border-rose-100">{d.description}</span></td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            )}
+
+            {/* Monthly Attendance Registry - Only on students_attendance sub-tab */}
+            {activeTab === 'students_attendance' && (
+            <div className="bg-white rounded-[2.5rem] shadow-glass border border-slate-100 overflow-hidden mb-10">
+              <header className="p-8 border-b border-slate-50 bg-slate-50/20">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+                  <h3 className="font-black text-xl text-slate-900 tracking-tight flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    </div>
+                    Monthly Attendance Overview ({new Date(month + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })})
+                  </h3>
+                  <div className="flex items-center gap-4">
+                    <select 
+                      value={stuFilter.faculty} 
+                      onChange={e => setStuFilter({...stuFilter, faculty: e.target.value})} 
+                      className="px-5 py-3 bg-white border border-slate-100 rounded-2xl text-slate-900 font-bold focus:outline-none text-sm shadow-sm cursor-pointer"
+                    >
+                      <option value="">All Departments</option>
+                      {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    <select 
+                      value={stuFilter.batch} 
+                      onChange={e => setStuFilter({...stuFilter, batch: e.target.value})} 
+                      className="px-5 py-3 bg-white border border-slate-100 rounded-2xl text-slate-900 font-bold focus:outline-none text-sm shadow-sm cursor-pointer"
+                    >
+                      <option value="">All Batches</option>
+                      {batches.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </header>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="text-[10px] text-slate-400 uppercase tracking-widest font-black bg-slate-50">
+                    <tr><th className="px-8 py-5">Profile</th><th className="px-8 py-5">Department</th><th className="px-8 py-5">Batch</th><th className="px-8 py-5 text-right">Attendance %</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {allMonthlyAttendance
+                      .filter(a => (!stuFilter.faculty || a.department === stuFilter.faculty) && (!stuFilter.batch || a.batch === stuFilter.batch))
+                      .length === 0 ? (
+                      <tr><td colSpan="4" className="px-8 py-16 text-center text-slate-300 font-bold uppercase tracking-widest text-[10px]">No attendance records uploaded for this criteria</td></tr>
+                    ) : (
+                      allMonthlyAttendance
+                        .filter(a => (!stuFilter.faculty || a.department === stuFilter.faculty) && (!stuFilter.batch || a.batch === stuFilter.batch))
+                        .map((a, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-8 py-6"><p className="font-black text-slate-900 leading-tight">{a.name}</p><p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{a.registrationNumber}</p></td>
+                          <td className="px-8 py-6"><p className="text-xs font-bold text-slate-600">{a.department}</p></td>
+                          <td className="px-8 py-6"><p className="text-xs font-bold text-slate-600">Batch {a.batch}</p></td>
+                          <td className="px-8 py-6 text-right">
+                            <span className={`inline-flex items-center px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${a.percentage >= 80 ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-rose-50 text-rose-600 border-rose-100'}`}>
+                              {a.percentage}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            )}
+
+            {/* MIS Registry Table - Only on students sub-tab */}
+            {activeTab === 'students' && (
             <div className="bg-white rounded-[2.5rem] shadow-glass border border-slate-100 overflow-hidden">
               <header className="p-8 border-b border-slate-50 bg-slate-50/20">
-                <h3 className="font-black text-xl text-slate-900 tracking-tight flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-primary-50 text-primary-600 flex items-center justify-center">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
-                  </div>
-                  {stuFilter.type === 'Mahapola' ? 'Mahapola Confirmed List' : stuFilter.type === 'Bursary' ? 'Bursary Confirmed List' : 'MIS Student Access Registry'}
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-black text-xl text-slate-900 tracking-tight flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-primary-50 text-primary-600 flex items-center justify-center">
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+                    </div>
+                    {stuFilter.type === 'Mahapola' ? 'Mahapola Confirmation Board' : stuFilter.type === 'Bursary' ? 'Bursary Confirmation Board' : 'MIS Student Access Registry'}
+                  </h3>
+                  
+                  {stuFilter.type && filteredStudents.some(s => s.status !== 'Provisioned') && (
+                    <button 
+                      onClick={() => handleBulkProvision(filteredStudents.filter(s => s.status !== 'Provisioned').map(s => s.id))}
+                      disabled={bulkProvisioning}
+                      className="px-8 py-3 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {bulkProvisioning ? 'Processing...' : `Bulk Approve & Provision ${stuFilter.type} List`}
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+                    </button>
+                  )}
+                </div>
               </header>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
@@ -590,60 +943,66 @@ export default function AdminDashboard() {
                 </table>
               </div>
             </div>
+            )}
           </div>
         )}
 
-        {/* --- FINANCIAL OPERATIONS TAB --- */}
-        {activeTab === 'financial' && (
+        {/* --- FINANCIAL OPERATIONS TABS --- */}
+        {['financial_eligibility', 'financial_history'].includes(activeTab) && (
           <div className="space-y-10">
-            {/* Pending Payments - From existing implementation but integrated */}
+            {/* HOD Submissions Eligibility Board - Only on financial_eligibility */}
+            {activeTab === 'financial_eligibility' && (
             <div className="bg-white rounded-[2.5rem] shadow-glass border border-slate-100 overflow-hidden">
               <header className="p-8 border-b border-slate-50 bg-slate-50/20 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
                 <h3 className="font-black text-xl text-slate-900 tracking-tight flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-primary-50 text-primary-600 flex items-center justify-center">
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                  <div className="w-10 h-10 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                   </div>
-                  Pending Disbursement Authorizations
+                  Mahapola / Bursary eligible list for this month ({new Date(month + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })})
                 </h3>
-                <div className="flex items-center gap-4 bg-white px-6 py-3 rounded-2xl border border-slate-100 shadow-sm">
-                  <span className="text-slate-400 font-black uppercase tracking-widest text-[9px]">Cycle Target</span>
-                  <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="bg-transparent border-none text-slate-900 font-bold focus:outline-none p-0 text-sm" />
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4 bg-white px-6 py-3 rounded-2xl border border-slate-100 shadow-sm">
+                    <span className="text-slate-400 font-black uppercase tracking-widest text-[9px]">Cycle Target</span>
+                    <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="bg-transparent border-none text-slate-900 font-bold focus:outline-none p-0 text-sm" />
+                  </div>
+                  {highAttendanceReport.length > 0 && (
+                    <button
+                      onClick={handleBulkApprovePayment}
+                      disabled={bulkApprovingPayments}
+                      className="px-8 py-3 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 disabled:opacity-50 flex items-center gap-2 transition-all"
+                    >
+                      {bulkApprovingPayments ? (
+                        <><svg className="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> Processing...</>
+                      ) : (
+                        <><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg> Approve All ({highAttendanceReport.length})</>
+                      )}
+                    </button>
+                  )}
                 </div>
               </header>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-left">
                   <thead className="text-[10px] text-slate-400 uppercase tracking-widest font-black bg-slate-50">
-                    <tr><th className="px-8 py-5">Profile</th><th className="px-8 py-5">Category</th><th className="px-8 py-5 text-right">Settlement</th><th className="px-8 py-5 text-center">Remaining</th><th className="px-8 py-5 text-center">State</th><th className="px-8 py-5 text-right">Actions</th></tr>
+                    <tr><th className="px-8 py-5">Profile</th><th className="px-8 py-5">Academic Details</th><th className="px-8 py-5">Scholarship</th><th className="px-8 py-5 text-right">Actions</th></tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {pendingPayments.length === 0 ? (
-                      <tr><td colSpan="6" className="px-8 py-16 text-center text-slate-300 font-bold uppercase tracking-widest text-[10px]">No pending disbursements for this cycle</td></tr>
+                    {highAttendanceReport.length === 0 ? (
+                      <tr><td colSpan="4" className="px-8 py-16 text-center text-slate-300 font-bold uppercase tracking-widest text-[10px]">No pending eligible submissions for this cycle</td></tr>
                     ) : (
-                      pendingPayments.map(p => (
-                        <tr key={p.studentId} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-8 py-6"><p className="font-black text-slate-900 leading-tight">{p.name}</p><p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{p.registrationNumber}</p></td>
-                          <td className="px-8 py-6"><span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${p.scholarshipType === 'Mahapola' ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'bg-violet-50 text-violet-600 border border-violet-100'}`}>{p.scholarshipType}</span></td>
-                          <td className="px-8 py-6 text-right font-black text-slate-900">Rs {p.amount.toLocaleString()}</td>
-                          <td className="px-8 py-6 text-center text-xs font-bold text-slate-400">{p.remainingMonths} Months</td>
-                          <td className="px-8 py-6 text-center"><span className="inline-flex items-center px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border bg-primary-50 text-primary-600 border-primary-100"><span className="w-1.5 h-1.5 bg-primary-500 rounded-full mr-2 animate-pulse shadow-neon"></span>{p.paymentStatus}</span></td>
+                      highAttendanceReport.map((s, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-8 py-6"><p className="font-black text-slate-900 leading-tight">{s.name}</p><p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{s.registrationNumber} | {s.nic}</p></td>
+                          <td className="px-8 py-6"><p className="text-xs font-bold text-slate-600">{s.faculty}</p><p className="text-[10px] text-slate-400 font-bold uppercase">{s.department} | Batch {s.batch}</p></td>
+                          <td className="px-8 py-6"><span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${s.scholarshipType === 'Mahapola' ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'bg-violet-50 text-violet-600 border border-violet-100'}`}>{s.scholarshipType}</span></td>
+
                           <td className="px-8 py-6 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={() => handleApprovePayment(p)}
-                                disabled={processingPaymentId === p.studentId}
-                                className="px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 disabled:opacity-50"
-                              >
-                                Approve
-                              </button>
-                              <button
-                                onClick={() => handleRejectPayment(p)}
-                                disabled={processingPaymentId === p.studentId || !p.paymentId}
-                                className="px-4 py-2 bg-rose-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-600 disabled:opacity-50"
-                                title={!p.paymentId ? 'No pending request id found for reject' : 'Reject payment'}
-                              >
-                                Reject
-                              </button>
-                            </div>
+                            <button
+                              onClick={() => handleApprovePayment({ studentId: s.studentId, scholarshipType: s.scholarshipType })}
+                              disabled={processingPaymentId === s.studentId}
+                              className="px-4 py-2 bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-600 disabled:opacity-50 shadow-lg shadow-emerald-500/20"
+                            >
+                              {processingPaymentId === s.studentId ? 'Processing...' : 'Approve'}
+                            </button>
                           </td>
                         </tr>
                       ))
@@ -653,7 +1012,10 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Financial History Registry */}
+            )}
+
+            {/* Financial History Registry - Only on financial_history */}
+            {activeTab === 'financial_history' && (
             <div className="bg-white rounded-[2.5rem] shadow-glass border border-slate-100 overflow-hidden">
               <header className="p-8 border-b border-slate-50 bg-slate-50/20">
                 <h3 className="font-black text-xl text-slate-900 flex items-center gap-3">
@@ -682,6 +1044,7 @@ export default function AdminDashboard() {
                 </table>
               </div>
             </div>
+            )}
           </div>
         )}
       </main>
@@ -737,6 +1100,62 @@ export default function AdminDashboard() {
         </div>
       )}
 
+      {/* Add Staff Modal */}
+      {showAddStaffModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-[2rem] w-full max-w-lg shadow-2xl overflow-hidden">
+            <div className="p-8 bg-slate-900 text-white">
+              <h3 className="text-2xl font-black tracking-tight">Provision Department Account</h3>
+              <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-1">Authorized personnel access creation</p>
+            </div>
+            <form onSubmit={handleCreateStaff} className="p-8 space-y-6">
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Full Name</label>
+                  <input type="text" required value={newStaff.name} onChange={e => setNewStaff({...newStaff, name: e.target.value})} className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl text-slate-900 font-bold focus:outline-none focus:ring-4 focus:ring-primary-500/10 transition-all" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Role</label>
+                  <select value={newStaff.role} onChange={e => setNewStaff({...newStaff, role: e.target.value})} className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl text-slate-900 font-bold focus:outline-none transition-all">
+                    <option value="HOD">Head of Department (HOD)</option>
+                    <option value="Counselor">Student Counselor</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Username / Reg No</label>
+                  <input type="text" required value={newStaff.username} onChange={e => setNewStaff({...newStaff, username: e.target.value})} className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl text-slate-900 font-bold focus:outline-none transition-all" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Initial Password</label>
+                  <input type="password" required value={newStaff.password} onChange={e => setNewStaff({...newStaff, password: e.target.value})} className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl text-slate-900 font-bold focus:outline-none transition-all" />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Assigned Department</label>
+                <select 
+                  disabled={newStaff.role === 'Counselor'}
+                  value={newStaff.role === 'Counselor' ? '' : newStaff.department} 
+                  onChange={e => setNewStaff({...newStaff, department: e.target.value})} 
+                  className={`w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl text-slate-900 font-bold focus:outline-none transition-all ${newStaff.role === 'Counselor' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {newStaff.role === 'Counselor' ? <option value="">General Access (All Departments)</option> : departments.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button type="button" onClick={() => setShowAddStaffModal(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-xl font-black text-sm tracking-tight hover:bg-slate-200 transition-all">Cancel</button>
+                <button type="submit" disabled={creatingStaff} className="flex-1 py-4 bg-primary-600 text-white rounded-xl font-black text-sm tracking-tight hover:bg-primary-700 transition-all shadow-lg shadow-primary-600/20 disabled:opacity-50 flex items-center justify-center gap-2">
+                  {creatingStaff ? 'Creating...' : 'Create Account'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

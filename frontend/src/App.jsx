@@ -4,21 +4,22 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import StudentDashboard from './pages/StudentDashboard';
-import StaffDashboard from './pages/StaffDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import HODDashboard from './pages/HODDashboard';
+import CounselorDashboard from './pages/CounselorDashboard';
 import AuditLogs from './pages/AuditLogs';
 import Layout from './components/Layout';
 
 function PrivateRoute({ children, roles }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
-  
+
   if (roles) {
     const userRole = (user.role || user.Role || '').toLowerCase();
     const hasRole = roles.some(r => r.toLowerCase() === userRole);
     if (!hasRole) return <Navigate to="/" replace />;
   }
-  
+
   return children;
 }
 
@@ -30,7 +31,8 @@ function AppRoutes() {
     if (!user) return '/login';
     const role = (user.role || user.Role || '').toLowerCase();
     if (role === 'student') return '/student';
-    if (role === 'staff') return '/staff';
+    if (role === 'hod') return '/hod';
+    if (role === 'counselor') return '/counselor';
     if (role === 'admin') return '/admin';
     return '/login'; // Safe fallback
   };
@@ -48,14 +50,19 @@ function AppRoutes() {
             <StudentDashboard key={user?.studentId || user?.userId} />
           </PrivateRoute>
         } />
-        <Route path="staff" element={
-          <PrivateRoute roles={['Staff', 'Admin']}>
-            <StaffDashboard />
-          </PrivateRoute>
-        } />
         <Route path="admin" element={
           <PrivateRoute roles={['Admin']}>
             <AdminDashboard />
+          </PrivateRoute>
+        } />
+        <Route path="hod" element={
+          <PrivateRoute roles={['HOD', 'Admin']}>
+            <HODDashboard />
+          </PrivateRoute>
+        } />
+        <Route path="counselor" element={
+          <PrivateRoute roles={['Counselor', 'Admin']}>
+            <CounselorDashboard />
           </PrivateRoute>
         } />
         <Route path="admin/audit" element={

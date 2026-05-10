@@ -18,10 +18,9 @@ export default function Login() {
     try {
       const { data } = await authApi.login(username, password);
       login(data);
-      if (data.role === 'Student') {
-        navigate('/student');
-      }
-      else if (data.role === 'Staff') navigate('/staff');
+      if (data.role === 'Student') navigate('/student');
+      else if (data.role === 'HOD') navigate('/hod');
+      else if (data.role === 'Counselor') navigate('/counselor');
       else navigate('/admin');
     } catch (err) {
       setError(err.response?.data?.message || 'Login failed');
@@ -137,10 +136,7 @@ export default function Login() {
             </div>
 
             <p className="text-sm font-bold text-slate-400">
-              Staff Member?{' '}
-              <a href="/register" className="text-primary-600 hover:text-primary-700 transition-colors border-b-2 border-primary-500/20 hover:border-primary-600 pb-0.5 ml-1">
-                Official Enrollment
-              </a>
+              Department Personnel? Please contact Super Admin for official account provisioning.
             </p>
           </footer>
         </div>

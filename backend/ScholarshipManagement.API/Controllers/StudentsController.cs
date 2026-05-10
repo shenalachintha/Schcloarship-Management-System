@@ -3,8 +3,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ScholarshipManagement.API.Models;
 using ScholarshipManagement.Application.Interfaces;
-using ScholarshipManagement.Domain.Constants;
 using System.Security.Claims;
+using ScholarshipManagement.Domain.Constants;
 
 namespace ScholarshipManagement.API.Controllers;
 
@@ -225,12 +225,27 @@ public class StudentsController : ControllerBase
         return forecasts;
     }
     [HttpGet]
-    [Authorize(Roles = "Staff,Admin")]
+    [Authorize(Roles = "Staff,Admin,HOD,Counselor")]
     public async Task<IActionResult> GetAllStudents(CancellationToken cancellationToken)
     {
-        var students = await _context.Students
+        var query = _context.Students
             .Include(s => s.User)
-            .Where(s => s.UserId != null)
+            .Where(s => s.UserId != null);
+
+        if (User.IsInRole("HOD"))
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(userIdClaim, out var userId))
+            {
+                var hod = await _context.Users.FindAsync(new object[] { userId }, cancellationToken);
+                if (hod != null && !string.IsNullOrEmpty(hod.Department))
+                {
+                    query = query.Where(s => s.Department == hod.Department);
+                }
+            }
+        }
+
+        var students = await query
             .Select(s => new
             {
                 s.StudentId,
@@ -251,7 +266,7 @@ public class StudentsController : ControllerBase
     }
 
     [HttpGet("{id}")]
-    [Authorize(Roles = "Staff,Admin")]
+    [Authorize(Roles = "Staff,Admin,HOD,Counselor")]
     public async Task<IActionResult> GetStudent(int id, CancellationToken cancellationToken)
     {
         var student = await _context.Students

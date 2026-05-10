@@ -30,11 +30,7 @@ export default function Layout() {
                         Dashboard
                       </NavLink>
                     )}
-                    {(user.role?.toLowerCase() === 'staff' || user.role?.toLowerCase() === 'admin') && (
-                      <NavLink to="/staff" className={({ isActive }) => `px-4 py-2 text-sm font-semibold rounded-xl transition-all duration-300 ${isActive ? 'bg-primary-600 text-white shadow-lg shadow-primary-200' : 'text-slate-500 hover:bg-white hover:text-primary-600'}`}>
-                        Staff Console
-                      </NavLink>
-                    )}
+
                     {user.role?.toLowerCase() === 'admin' && (
                       <NavLink to="/admin" className={({ isActive }) => `px-4 py-2 text-sm font-semibold rounded-xl transition-all duration-300 ${isActive ? 'bg-primary-600 text-white shadow-lg shadow-primary-200' : 'text-slate-500 hover:bg-white hover:text-primary-600'}`}>
                         Admin Center

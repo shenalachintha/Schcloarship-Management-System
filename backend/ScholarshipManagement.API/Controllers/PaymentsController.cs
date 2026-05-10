@@ -164,6 +164,111 @@ public class PaymentsController : ControllerBase
         return Ok(new { message = "Payment processed successfully" });
     }
 
+    [HttpPost("bulk-approve")]
+    public async Task<IActionResult> BulkApprovePayments([FromBody] List<ApprovePaymentRequest> requests, CancellationToken cancellationToken)
+    {
+        if (requests == null || !requests.Any())
+            return BadRequest(new { message = "No payment requests provided." });
+
+        int successCount = 0;
+        var errors = new List<string>();
+
+        foreach (var request in requests)
+        {
+            try
+            {
+                var student = await _context.Students.FindAsync(new object[] { request.StudentId }, cancellationToken);
+                if (student == null)
+                {
+                    errors.Add($"Student ID {request.StudentId} not found.");
+                    continue;
+                }
+
+                var amount = request.ScholarshipType == ScholarshipConstants.ScholarshipTypeMahapola
+                    ? ScholarshipConstants.MahapolaAmount
+                    : ScholarshipConstants.BursaryAmount;
+
+                var existing = await _context.Payments
+                    .FirstOrDefaultAsync(p => p.StudentId == request.StudentId && p.Month == request.Month, cancellationToken);
+
+                if (existing != null)
+                {
+                    if (existing.PaymentStatus == ScholarshipConstants.StatusProcessed)
+                        continue; // Already processed, skip
+                    if (existing.PaymentStatus == ScholarshipConstants.StatusRejected)
+                        continue; // Previously rejected, skip
+
+                    existing.PaymentStatus = ScholarshipConstants.StatusProcessed;
+                    existing.ProcessedAt = DateTime.UtcNow;
+                    existing.ProcessedBy = User.Identity?.Name ?? "Admin";
+                }
+                else
+                {
+                    _context.Payments.Add(new Domain.Entities.Payment
+                    {
+                        StudentId = request.StudentId,
+                        Amount = amount,
+                        Month = request.Month,
+                        PaymentStatus = ScholarshipConstants.StatusProcessed,
+                        ScholarshipType = request.ScholarshipType,
+                        ProcessedAt = DateTime.UtcNow,
+                        ProcessedBy = User.Identity?.Name ?? "Admin"
+                    });
+                }
+
+                // Handle scholarship tracking
+                var scholarship = await _context.Scholarships
+                    .FirstOrDefaultAsync(s => s.StudentId == request.StudentId && s.Type == request.ScholarshipType, cancellationToken);
+
+                if (scholarship == null)
+                {
+                    var duration = request.ScholarshipType == ScholarshipConstants.ScholarshipTypeMahapola
+                        ? ScholarshipConstants.MahapolaDurationMonths
+                        : ScholarshipConstants.BursaryDurationMonths;
+
+                    scholarship = new Domain.Entities.Scholarship
+                    {
+                        StudentId = request.StudentId,
+                        Type = request.ScholarshipType,
+                        Status = ScholarshipConstants.StatusActive,
+                        DurationMonths = duration,
+                        RemainingMonths = duration,
+                        StartDate = DateTime.UtcNow
+                    };
+                    _context.Scholarships.Add(scholarship);
+                }
+
+                if (scholarship.Status == ScholarshipConstants.StatusActive)
+                {
+                    scholarship.RemainingMonths = Math.Max(0, scholarship.RemainingMonths - 1);
+                    scholarship.UpdatedAt = DateTime.UtcNow;
+                    if (scholarship.RemainingMonths == 0)
+                        scholarship.Status = ScholarshipConstants.StatusInactive;
+                }
+
+                var message = $"{request.ScholarshipType} payment credited: Rs {amount} for {request.Month}. Remaining payments: {scholarship?.RemainingMonths ?? 0} months.";
+                await _notificationService.CreateNotificationAsync(request.StudentId, message, "Payment", cancellationToken);
+
+                await _auditService.LogAsync(
+                    "Payment Approved",
+                    $"Bulk approved {request.ScholarshipType} payment of Rs {amount} for student {student.Name} ({student.RegistrationNumber}) for month {request.Month}.",
+                    "Payment",
+                    null,
+                    User.Identity?.Name ?? "Admin",
+                    cancellationToken);
+
+                successCount++;
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"Failed for student ID {request.StudentId}: {ex.Message}");
+            }
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return Ok(new { message = $"Successfully processed {successCount} of {requests.Count} payments.", successCount, errors });
+    }
+
     [HttpPost("reject")]
     public async Task<IActionResult> RejectPayment([FromBody] RejectPaymentRequest request, CancellationToken cancellationToken)
     {

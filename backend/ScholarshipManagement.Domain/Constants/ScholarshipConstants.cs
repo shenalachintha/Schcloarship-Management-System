@@ -19,4 +19,21 @@ public static class ScholarshipConstants
     public const string StatusPending = "Pending";
     public const string StatusApproved = "Approved";
     public const string StatusProcessed = "Processed";
+
+    public const string RoleAdmin = "Admin";
+    public const string RoleStudent = "Student";
+    public const string RoleStaff = "Staff";
+    public const string RoleHOD = "HOD";
+    public const string RoleCounselor = "Counselor";
+
+    public static readonly string[] Departments = new[]
+    {
+        "Department of Computer Science",
+        "Department of Physical Science",
+        "Department of Language and Communication Studies",
+        "Department of Business Management Studies",
+        "Department of Physiology",
+        "Department of Pharmacology",
+        "Department of Clinical"
+    };
 }

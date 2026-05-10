@@ -47,7 +47,10 @@ public class AuthService : IAuthService
             Role = user.Role,
             StudentId = studentId,
             UserId = user.UserId,
-            IsApproved = user.IsApproved
+            IsApproved = user.IsApproved,
+            Faculty = user.Faculty ?? string.Empty,
+            Department = user.Department ?? string.Empty,
+            Name = user.Name
         };
     }
 
@@ -131,7 +134,9 @@ public class AuthService : IAuthService
             Role = user.Role,
             StudentId = studentId,
             UserId = user.UserId,
-            IsApproved = user.IsApproved
+            IsApproved = user.IsApproved,
+            Faculty = user.Faculty ?? string.Empty,
+            Department = user.Department ?? string.Empty
         };
     }
 
